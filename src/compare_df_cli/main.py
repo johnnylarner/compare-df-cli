@@ -12,7 +12,9 @@ logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger("compare_df_cli")
 
 app = typer.Typer(
-    name="compare_df_cli", help="Small CLI tool designed to compare polars dataframes"
+    name="compare_df_cli",
+    help="Small CLI tool designed to compare polars dataframes",
+    pretty_exceptions_enable=False,
 )
 
 
@@ -22,14 +24,30 @@ def version_callback(version: bool):
         raise typer.Exit()
 
 
-def read_csv_as_df(path: str) -> pl.DataFrame:
+def read_csv_as_df(path: str, delim: str) -> pl.DataFrame:
     path = Path(path)
-    print(pl.read_csv(path))
+    return pl.read_csv(path, separator=delim)
 
 
 def query_athena(query: str, database: str) -> pl.DataFrame:
     pandas_df = wr.athena.read_sql_query(query, database)
     return pl.from_pandas(pandas_df)
+
+
+def assert_pl_frame_equal(
+    actual_df, expected_df, check_row_order=False, **kwargs
+) -> None:
+    try:
+        assert_frame_equal(
+            actual_df, expected_df, check_row_order=check_row_order, **kwargs
+        )
+        assert True
+        return
+    except AssertionError as e:
+        print(
+            f"DataFrames are not equal. Expected:\n{expected_df},\nactual:\n{actual_df}"
+        )
+        raise e
 
 
 FromCsvOption = typer.Option(
@@ -39,6 +57,14 @@ FromCsvOption = typer.Option(
     metavar="PATH",
     help="path to the csv file",
 )
+WithDelimiterOption = typer.Option(
+    ";",
+    "-wd",
+    "--with-delimiter",
+    metavar="DELIMITER",
+    help="delimiter for the csv file",
+)
+
 FromQueryOption = typer.Option(
     None, "-q", "--from-query", metavar="QUERY", help="query to athena database"
 )
@@ -50,6 +76,7 @@ DataBaseOption = typer.Option(
 @app.command()
 def main(
     FromCsvOption: str = FromCsvOption,
+    WithDelimiterOption: str = WithDelimiterOption,
     FromQueryOption: str = FromQueryOption,
     DataBaseOption: str = DataBaseOption,
 ):
@@ -69,9 +96,11 @@ def main(
             "You need to provide all the parameters to run the application, use --help to see the options."
         )
 
-    csv_df = read_csv_as_df(FromCsvOption)
+    csv_df = read_csv_as_df(FromCsvOption, WithDelimiterOption)
+    logger.info("Read csv file successfully: %s", csv_df)
+
     athena_df = query_athena(FromQueryOption, DataBaseOption)
-    assert_frame_equal(
+    assert_pl_frame_equal(
         csv_df, athena_df, check_column_order=False, check_row_order=False
     )
 
