@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 import awswrangler as wr
+import pandas as pd
 import polars as pl
 import typer
 from polars.testing import assert_frame_equal
@@ -44,10 +45,35 @@ def assert_pl_frame_equal(
         assert True
         return
     except AssertionError as e:
+        raise_df_diff(actual_df, expected_df)
         print(
             f"DataFrames are not equal. Expected:\n{expected_df},\nactual:\n{actual_df}"
         )
         raise e
+
+
+def raise_df_diff(left: pl.DataFrame, right: pl.DataFrame) -> pl.DataFrame:
+    left_cols, right_cols = set(left.columns), set(right.columns)
+
+    left_cols_only = left_cols - right_cols
+    right_cols_only = right_cols - left_cols
+    if left_cols_only or right_cols_only:
+        raise Exception(
+            f"Columns in left but not right: {left_cols_only}\nColumns in right but not left: {right_cols_only}"
+        )
+
+    left_cols, right_cols = sorted(list(left_cols)), sorted(list(right_cols))
+    left, right = left.select(*left_cols), right.select(*right_cols)
+    left, right = left.sort(*left_cols), right.sort(*right_cols)
+
+    left, right = left.to_pandas(), right.to_pandas()
+
+    diff = pd.DataFrame.subtract(left, right)
+    diff = diff[diff != 0].dropna(how="all")
+
+    result = pl.from_pandas(diff)
+
+    raise Exception("Differences found: \n" + str(result))
 
 
 FromCsvOption = typer.Option(
